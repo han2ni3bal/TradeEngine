@@ -33,5 +33,14 @@ After that, if the status is changed, it will be a response, but if there is lon
 it by themselves, the trade will be set to killed automatically.
 
 ## Use the system
-Firstly, the requirement packages need to be installed and then, make sure the database is created correctly.
+Firstly, the requirement packages need to be installed. Then, make sure the database is created correctly.
 The last step is run startEngine.sh to start the server!
+
+http://127.0.0.1:8000/trade/orders/make is the main url to make a new trade
+Method: Post
+Example Request.body:
+    {
+        "type":"buy",
+        "price":9000,
+        "quantity":5
+    }
