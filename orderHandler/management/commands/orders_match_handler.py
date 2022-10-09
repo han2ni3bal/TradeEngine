@@ -4,7 +4,7 @@ import sys
 import time
 from multiprocessing import Process
 from django.core.management.base import BaseCommand
-from django.db import connections
+from django.db import connections, transaction
 from loguru import logger
 
 
@@ -41,44 +41,48 @@ class Command(BaseCommand):
 def select_and_handle_buy_orders():
   connections.close_all()
   while True:
-    logger.info("Process starts to select and match orders")
-    buy_orders = Orders.objects.filter(order_type="buy", order_status="enqueued").order_by("order_time")
-    for buy_order in buy_orders:
-      logger.info("Start to match the order: Id:{}, Price:{} and Quantity:{}".
-                  format(buy_order.order_id, buy_order.order_price, buy_order.order_quantity))
-      try:
-        left = match_buy_order_to_sell(buy_order)
-        logger.info("The left number is {}".format(left))
-      except ValueError as e:
-        logger.warning("error occur:{}".format(e))
-        continue
-      if left > 0:
-        buy_order.order_left_quantity = left
-      else:
-        buy_order.order_status = "filled"
-        buy_order.order_left_quantity = 0
-      buy_order.save()
-    time.sleep(5)
+    with transaction.atomic():
+      logger.info("Process starts to select and match orders")
+      buy_orders = Orders.objects.select_for_update().\
+        filter(order_type="buy", order_status="enqueued").order_by("order_time")
+      for buy_order in buy_orders:
+        logger.info("Start to match the order: Id:{}, Price:{} and Quantity:{}".
+                    format(buy_order.order_id, buy_order.order_price, buy_order.order_quantity))
+        try:
+          left = match_buy_order_to_sell(buy_order)
+          logger.info("The left number is {}".format(left))
+        except ValueError as e:
+          logger.warning("error occur:{}".format(e))
+          continue
+        if left > 0:
+          buy_order.order_left_quantity = left
+        else:
+          buy_order.order_status = "filled"
+          buy_order.order_left_quantity = 0
+        buy_order.save()
+      time.sleep(5)
 
 
 def match_buy_order_to_sell(order):
   price = order.order_price
   quantity = order.order_left_quantity
-  sell_orders = Orders.objects.filter(order_type="sell", order_status="enqueued", order_price=price)
-  if len(sell_orders) == 0:
-    raise ValueError("There is no matched sell orders!")
-  sell_orders = sell_orders.order_by("order_time")
-  logger.info(sell_orders)
-  for sell_order in sell_orders:
-    if sell_order.order_left_quantity > quantity:
-      logger.info("The sell order is more than the buy order")
-      sell_order.order_left_quantity = sell_order.order_left_quantity - quantity
-      sell_order.save()
-      return 0
-    elif sell_order.order_left_quantity <= quantity:
-      logger.info("The sell order can fill the buy order")
-      sell_order.order_status = "filled"
-      left = int(quantity - sell_order.order_left_quantity)
-      sell_order.order_left_quantity = 0
-      sell_order.save()
-      return left
+  with transaction.atomic():
+    sell_orders = Orders.objects.select_for_update().\
+      filter(order_type="sell", order_status="enqueued", order_price=price)
+    if len(sell_orders) == 0:
+      raise ValueError("There is no matched sell orders for order {}!".format(order.order_id))
+    sell_orders = sell_orders.order_by("order_time")
+    logger.info(sell_orders)
+    for sell_order in sell_orders:
+      if sell_order.order_left_quantity > quantity:
+        logger.info("The sell order is more than the buy order")
+        sell_order.order_left_quantity = sell_order.order_left_quantity - quantity
+        sell_order.save()
+        return 0
+      elif sell_order.order_left_quantity <= quantity:
+        logger.info("The sell order can fill the buy order")
+        sell_order.order_status = "filled"
+        left = int(quantity - sell_order.order_left_quantity)
+        sell_order.order_left_quantity = 0
+        sell_order.save()
+        return left

@@ -107,11 +107,13 @@ def make_trade(request):
         if quantity is not None:
             left_quantity = quantity
     except func_timeout.exceptions.FunctionTimedOut:
+        logger.info("Time out for order{}, if you order is filled, you will receive a message!".format(order_id))
         try:
             check_response = requests.get(url=url)
             if check_response.status_code != 200:
                 raise Exception("Fail to check trade")
             left_quantity = check_response.json().get("order_left_quantity")
+            status = check_response.json().get("order_status")
         except Exception as e:
             logger.exception(e)
     # Return response by different status
@@ -132,8 +134,8 @@ def make_trade(request):
 def check_trade_status(url: str, order_id: int) -> (str, int):
     status = "enqueued"
     left_quantity = None
-    logger.info("The trade,id:{} is still enqueued...".format(order_id))
     while status == "enqueued":
+        logger.info("The trade,id:{} is still enqueued...".format(order_id))
         try:
             check_response = requests.get(url=url)
         except Exception as e:
