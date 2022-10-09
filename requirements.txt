@@ -4,3 +4,4 @@ requests>=2.12
 loguru~=0.6.0
 djangorestframework~=3.14.0
 PyYAML~=6.0
+func_timeout
